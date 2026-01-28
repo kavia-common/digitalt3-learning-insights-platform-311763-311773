@@ -1,0 +1,4 @@
+{
+    "command": "cd db_visualizer && npm install",
+    "working_directory": "/home/kavia/workspace/code-generation/digitalt3-learning-insights-platform-311763-311773/lms_database"
+}

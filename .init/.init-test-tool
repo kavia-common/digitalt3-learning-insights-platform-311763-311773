@@ -1,0 +1,4 @@
+{
+    "command": "mongosh --host localhost --port 5000 --eval \"db.adminCommand(ping)\"",
+    "working_directory": "/home/kavia/workspace/code-generation/digitalt3-learning-insights-platform-311763-311773/lms_database"
+}
