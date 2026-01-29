@@ -1,10 +1,11 @@
 #!/bin/bash
 
 # MongoDB startup script following the same pattern
+# NOTE: Kavia preview expects MongoDB to be reachable on port 5001.
 DB_NAME="myapp"
 DB_USER="appuser"
 DB_PASSWORD="dbuser123"
-DB_PORT="5000"
+DB_PORT="5001"
 
 echo "Starting MongoDB setup..."
 
@@ -62,7 +63,7 @@ sudo rm -f /tmp/mongodb-*.sock 2>/dev/null
 
 # Start MongoDB server without authentication initially using nohup
 echo "Starting MongoDB server..."
-nohup sudo mongod --dbpath /var/lib/mongodb --port ${DB_PORT} --bind_ip 127.0.0.1 --unixSocketPrefix /var/run/mongodb > /var/lib/mongodb/mongod.log 2>&1 &
+nohup sudo mongod --dbpath /var/lib/mongodb --port ${DB_PORT} --bind_ip 0.0.0.0,127.0.0.1 --unixSocketPrefix /var/run/mongodb > /var/lib/mongodb/mongod.log 2>&1 &
 
 # Wait for MongoDB to start
 echo "Waiting for MongoDB to start..."
