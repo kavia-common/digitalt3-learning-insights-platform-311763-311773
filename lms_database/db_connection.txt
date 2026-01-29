@@ -1,1 +1,1 @@
-mongosh mongodb://appuser:dbuser123@localhost:5000/myapp?authSource=admin
+mongosh mongodb+srv://rossiniheyyou_db_user:eq6JEnQIAK8ODZZM@cluster0.tzdrkdc.mongodb.net/retryWrites=true/
