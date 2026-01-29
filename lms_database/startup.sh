@@ -2,9 +2,9 @@
 
 # MongoDB startup script following the same pattern
 # NOTE: Kavia preview expects MongoDB to be reachable on port 5001.
-DB_NAME="myapp"
-DB_USER="appuser"
-DB_PASSWORD="dbuser123"
+DB_NAME="Cluster0"
+DB_USER="rossiniheyyou_db_user"
+DB_PASSWORD="eq6JEnQIAK8ODZZM"
 DB_PORT="5001"
 
 echo "Starting MongoDB setup..."
@@ -141,4 +141,46 @@ echo "$(cat db_connection.txt)"
 # MongoDB continues running in background
 echo ""
 echo "MongoDB is running in the background."
+
+# --- Optional: start the db_visualizer (Node.js) ---
+# Kavia preview/CI environments may invoke this container startup expecting the viewer to be available.
+# We ensure dependencies are installed before starting to avoid "Cannot find module ..." errors.
+#
+# Controls:
+#   START_DB_VISUALIZER=1  -> start viewer (default)
+#   START_DB_VISUALIZER=0  -> skip viewer
+#   DB_VISUALIZER_PORT=3000 -> port for viewer (default 3000)
+START_DB_VISUALIZER="${START_DB_VISUALIZER:-1}"
+DB_VISUALIZER_PORT="${DB_VISUALIZER_PORT:-3000}"
+
+if [ "${START_DB_VISUALIZER}" = "1" ]; then
+    echo ""
+    echo "Starting db_visualizer..."
+
+    pushd db_visualizer > /dev/null
+
+    # Load DB connection env for the viewer if present
+    if [ -f "mongodb.env" ]; then
+        # shellcheck disable=SC1091
+        source mongodb.env
+    fi
+
+    # Install dependencies (prefer npm ci when lockfile exists)
+    if [ -f "package-lock.json" ]; then
+        echo "Installing db_visualizer dependencies with npm ci..."
+        npm ci --no-audit --no-fund
+    else
+        echo "Installing db_visualizer dependencies with npm install..."
+        npm install --no-audit --no-fund
+    fi
+
+    # Start viewer in background
+    echo "Launching db_visualizer on port ${DB_VISUALIZER_PORT}..."
+    nohup env PORT="${DB_VISUALIZER_PORT}" npm start > db_visualizer.log 2>&1 &
+
+    popd > /dev/null
+
+    echo "db_visualizer started (logs: lms_database/db_visualizer/db_visualizer.log)"
+fi
+
 echo "You can now start your application."
