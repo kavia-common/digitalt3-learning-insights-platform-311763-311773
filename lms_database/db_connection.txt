@@ -1,1 +1,1 @@
-mongosh mongodb://appuser:dbuser123@localhost:5001/myapp?authSource=admin
+mongosh mongodb://rossiniheyyou_db_user:eq6JEnQIAK8ODZZM@localhost:5001/Cluster0?authSource=admin
