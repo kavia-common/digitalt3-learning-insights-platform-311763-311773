@@ -29,7 +29,9 @@ sudo mkdir -p "${MONGO_SOCKET_PREFIX}"
 sudo chmod 775 "${MONGO_SOCKET_PREFIX}" 2>/dev/null || true
 
 # Ensure log file is present and writable (and has stable location)
+# This is important for debuggability and also because mongod will fail to start if logpath cannot be opened.
 echo "Ensuring MongoDB log file exists and is writable: ${MONGO_LOGPATH}"
+sudo mkdir -p "$(dirname "${MONGO_LOGPATH}")"
 sudo touch "${MONGO_LOGPATH}"
 sudo chown mongodb:mongodb "${MONGO_LOGPATH}" 2>/dev/null || true
 sudo chmod 664 "${MONGO_LOGPATH}" 2>/dev/null || true
@@ -47,9 +49,41 @@ tail_mongo_log() {
     echo ""
 }
 
-# Check if MongoDB is already running (expected port)
-if mongosh --port ${DB_PORT} --eval "db.adminCommand('ping')" > /dev/null 2>&1; then
-    echo "MongoDB is already running on port ${DB_PORT}!"
+# Helper: verify something is actually LISTENING on the desired port (stronger readiness than just ping attempts).
+is_port_listening() {
+    local port="$1"
+
+    # Prefer ss if available (common on modern Linux). Fall back to netstat.
+    if command -v ss >/dev/null 2>&1; then
+        ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)${port}$"
+        return $?
+    fi
+
+    if command -v netstat >/dev/null 2>&1; then
+        netstat -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)${port}$"
+        return $?
+    fi
+
+    # Last resort: use lsof if present.
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | grep -q ":${port} "
+        return $?
+    fi
+
+    # If we cannot check, return non-zero so caller can rely on mongosh check only.
+    return 1
+}
+
+# If MongoDB is already responding on expected port, we consider it up.
+# (We still verify port listening to avoid false-positives in some environments.)
+if mongosh --port "${DB_PORT}" --eval "db.adminCommand('ping')" > /dev/null 2>&1; then
+    echo "MongoDB responds to ping on port ${DB_PORT}."
+
+    if is_port_listening "${DB_PORT}"; then
+        echo "Verified: port ${DB_PORT} is listening."
+    else
+        echo "WARNING: Could not verify listening state for port ${DB_PORT} (ss/netstat/lsof unavailable or no listener found)."
+    fi
 
     # Try to verify the database exists and user can connect
     if mongosh "mongodb://${DB_USER}:${DB_PASSWORD}@localhost:${DB_PORT}/${DB_NAME}?authSource=admin" --eval "db.getName()" > /dev/null 2>&1; then
@@ -80,8 +114,8 @@ fi
 
 # Check if MongoDB is running on a different port and stop it (to avoid port conflicts)
 if pgrep -x mongod > /dev/null; then
-    MONGO_PID=$(pgrep -x mongod)
-    CURRENT_PORT=$(sudo lsof -Pan -p "$MONGO_PID" -i 2>/dev/null | grep -o ":[0-9]*" | grep -o "[0-9]*" | head -1 || true)
+    MONGO_PID="$(pgrep -x mongod | head -1)"
+    CURRENT_PORT="$(sudo lsof -Pan -p "${MONGO_PID}" -i 2>/dev/null | grep -o ":[0-9]*" | grep -o "[0-9]*" | head -1 || true)"
 
     if [ "${CURRENT_PORT:-}" = "${DB_PORT}" ]; then
         echo "MongoDB is already running on port ${DB_PORT}!"
@@ -97,8 +131,8 @@ fi
 # Clean up any existing socket files
 sudo rm -f /tmp/mongodb-*.sock 2>/dev/null || true
 
-# Start MongoDB server without authentication initially using nohup
-# Keep external bind and port 5001.
+# Start MongoDB server using nohup.
+# CRITICAL: Use explicit logpath and logappend so log always lands in /var/lib/mongodb/mongod.log.
 echo "Starting MongoDB server..."
 echo "Log file: ${MONGO_LOGPATH}"
 nohup sudo mongod \
@@ -120,24 +154,32 @@ SLEEP_SECONDS=2
 
 ready="0"
 for i in $(seq 1 "${MAX_RETRIES}"); do
-    if mongosh --port ${DB_PORT} --eval "db.adminCommand('ping')" > /dev/null 2>&1; then
-        echo "MongoDB is ready!"
-        ready="1"
-        break
+    # Check: process listening on port (strong signal that mongod bound successfully).
+    if is_port_listening "${DB_PORT}"; then
+        # Check: mongodb responds to ping (stronger end-to-end readiness).
+        if mongosh --port "${DB_PORT}" --eval "db.adminCommand('ping')" > /dev/null 2>&1; then
+            echo "MongoDB is ready and listening on port ${DB_PORT}!"
+            ready="1"
+            break
+        fi
     fi
+
     echo "Waiting... (${i}/${MAX_RETRIES})"
     sleep "${SLEEP_SECONDS}"
 done
 
 if [ "${ready}" != "1" ]; then
-    echo "ERROR: MongoDB failed to become ready on port ${DB_PORT}."
+    echo "ERROR: MongoDB failed to become ready and listening on port ${DB_PORT}."
+    echo "Diagnostics:"
+    echo "- mongod process: $(pgrep -x mongod >/dev/null 2>&1 && echo "present" || echo "not found")"
+    echo "- port ${DB_PORT} listening: $(is_port_listening "${DB_PORT}" && echo "yes" || echo "no")"
     tail_mongo_log
     exit 1
 fi
 
 # Create database and user
 echo "Setting up database and user..."
-mongosh --port ${DB_PORT} << EOF
+mongosh --port "${DB_PORT}" << EOF
 // Switch to admin database for user creation
 use admin
 
